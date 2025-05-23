@@ -1,4 +1,3 @@
 __pycache__
 *.pyc
-@app-studio
-app-studio
+sources/**/*
