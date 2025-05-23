@@ -7,7 +7,7 @@ startCommand:
     type: object
     description: Empty configuration
   commandFunction:
-    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    # A function that produces the CLI command based on the given config to start the MCP on stdio.
     |-
-    (config) => ({ command: 'node', args: ['dist/index.js'] })
+    (config) => ({ command: 'python', args: ['docs_server.py'] })
   exampleConfig: {}
