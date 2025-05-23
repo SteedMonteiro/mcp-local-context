@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""
+Local Documentation MCP Server with RAG
+
+This server provides access to local documents stored in the `sources/` folder,
+making it easy for AI assistants to access your library documents.
+It uses RAG (Retrieval-Augmented Generation) for semantic search capabilities.
+It supports three types of documents: documentations, guides, and conventions.
+"""
+
+import os
+import glob
+import re
+from pathlib import Path
+from typing import List, Dict, Optional, Any, Literal
+
+from fastmcp import FastMCP, Context
+from vlite import VLite
+
+# Initialize the MCP server
+mcp = FastMCP(
+    name="Local Developement Context MCP",
+    description= "Retrieves development informations with documentations, guides, and conventions ",
+    version="1.0.0",
+)
+
+# Initialize the vector database
+SOURCES_DIR = Path("sources")
+vlite_db = VLite(collection="local_docs")
+
+# Document types
+DocumentType = Literal["documentation", "guide", "convention"]
+
+# Document type
+class DocumentResult:
+    def __init__(self, file_path: str, content: str, doc_type: DocumentType, score: Optional[float] = None):
+        self.file_path = file_path
+        self.content = content
+        self.doc_type = doc_type
+        self.score = score
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "file_path": self.file_path,
+            "content": self.content,
+            "doc_type": self.doc_type,
+        }
+        if self.score is not None:
+            result["score"] = self.score
+        return result
+
+def get_file_content(file_path: str) -> str:
+    """Read the content of a file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+
+def get_relative_path(file_path: str) -> str:
+    """Get the path relative to the sources directory."""
+    abs_path = os.path.abspath(file_path)
+    abs_docs = os.path.abspath(SOURCES_DIR)
+    if abs_path.startswith(abs_docs):
+        return os.path.relpath(abs_path, abs_docs)
+    return file_path
+
+def determine_doc_type(file_path: str, content: Optional[str] = None) -> DocumentType:
+    """
+    Determine the document type based on file path and/or content.
+
+    Rules:
+    - Files with "guide" in the path or title are guides
+    - Files with "convention" in the path or title are conventions
+    - All other files are considered documentation
+
+    Args:
+        file_path: Path to the file
+        content: Optional content of the file to analyze
+
+    Returns:
+        Document type: "documentation", "guide", or "convention"
+    """
+    rel_path = get_relative_path(file_path)
+
+    # Check path for guide or convention indicators
+    if "guide" in rel_path.lower():
+        return "guide"
+    elif "convention" in rel_path.lower():
+        return "convention"
+
+    # If content is provided, check for indicators in the first few lines
+    if content:
+        first_lines = content.split('\n')[:10]
+        first_text = '\n'.join(first_lines).lower()
+
+        if "guide" in first_text or "how to" in first_text:
+            return "guide"
+        elif "convention" in first_text or "standard" in first_text or "rule" in first_text:
+            return "convention"
+
+    # Default to documentation
+    return "documentation"
+
+@mcp.tool()
+def build_docs_index(ctx: Context) -> str:
+    """
+    Builds or rebuilds the search index for local documents.
+
+    This tool processes all document files and creates a search index for semantic search.
+    Use this tool if you've added new document files or updated existing ones.
+
+    The index is used by the 'semantic_search' tool to find relevant documents.
+    Documents are categorized as documentation, guides, or conventions.
+    """
+    # Clear existing index
+    vlite_db.clear()
+
+    # Find all markdown and text files in the sources directory
+    markdown_files = glob.glob(f"{SOURCES_DIR}/**/*.md", recursive=True)
+    text_files = glob.glob(f"{SOURCES_DIR}/**/*.txt", recursive=True)
+    mdx_files = glob.glob(f"{SOURCES_DIR}/**/*.mdx", recursive=True)
+    all_files = markdown_files + text_files + mdx_files
+
+    if not all_files:
+        return "No document files found in the sources directory."
+
+    # Counters for document types
+    doc_type_counts = {
+        "documentation": 0,
+        "guide": 0,
+        "convention": 0
+    }
+
+    # Add each file to the index
+    for file_path in all_files:
+        try:
+            content = get_file_content(file_path)
+            relative_path = get_relative_path(file_path)
+
+            # Determine document type
+            doc_type = determine_doc_type(file_path, content)
+            doc_type_counts[doc_type] += 1
+
+            # Add to vlite with metadata including document type
+            vlite_db.add(
+                data=content,
+                metadata={
+                    "file_path": relative_path,
+                    "doc_type": doc_type
+                }
+            )
+
+            ctx.info(f"Indexed: {relative_path} (Type: {doc_type})")
+        except Exception as e:
+            ctx.error(f"Error indexing {file_path}: {str(e)}")
+
+    # Create summary message
+    summary = f"Successfully indexed {len(all_files)} files:\n"
+    summary += f"- Documentation: {doc_type_counts['documentation']}\n"
+    summary += f"- Guides: {doc_type_counts['guide']}\n"
+    summary += f"- Conventions: {doc_type_counts['convention']}"
+
+    return summary
+
+@mcp.tool()
+def list_local_docs() -> List[str]:
+    """
+    Lists all available document files in the local sources directory.
+
+    This tool provides a comprehensive list of all document files available in the local sources directory.
+    Use this to discover what documents are available locally before requesting specific files.
+
+    Returns:
+        A list of file paths relative to the sources directory.
+    """
+    markdown_files = glob.glob(f"{SOURCES_DIR}/**/*.md", recursive=True)
+    text_files = glob.glob(f"{SOURCES_DIR}/**/*.txt", recursive=True)
+    mdx_files = glob.glob(f"{SOURCES_DIR}/**/*.mdx", recursive=True)
+    all_files = markdown_files + text_files + mdx_files
+
+    # Convert to relative paths
+    relative_paths = [get_relative_path(file_path) for file_path in all_files]
+
+    # Sort for better readability
+    relative_paths.sort()
+
+    return relative_paths
+
+@mcp.tool()
+def list_docs_by_type(doc_type: DocumentType) -> List[str]:
+    """
+    Lists all document files of a specific type.
+
+    This tool provides a list of all document files of the specified type
+    (documentation, guide, or convention) available in the local sources directory.
+
+    Args:
+        doc_type: The type of document to list ("documentation", "guide", or "convention")
+
+    Returns:
+        A list of file paths relative to the sources directory.
+    """
+    # Get all files
+    all_files = list_local_docs()
+
+    # Filter files by type
+    result_files = []
+    for file_path in all_files:
+        full_path = os.path.join(SOURCES_DIR, file_path)
+        content = get_file_content(full_path)
+        file_doc_type = determine_doc_type(full_path, content)
+
+        if file_doc_type == doc_type:
+            result_files.append(file_path)
+
+    return result_files
+
+@mcp.tool()
+def search_local_docs(query: str, doc_type: Optional[DocumentType] = None) -> List[str]:
+    """
+    Searches for document files in the local sources directory that match a query.
+
+    This tool helps you find specific document files based on a search query.
+    The search is performed on file paths and matches any part of the path.
+    You can optionally filter by document type.
+
+    Args:
+        query: Search query to find matching document files.
+        doc_type: Optional document type to filter results ("documentation", "guide", or "convention").
+
+    Returns:
+        A list of file paths that match the query.
+    """
+    # Get all docs or filter by type first
+    if doc_type:
+        all_docs = list_docs_by_type(doc_type)
+    else:
+        all_docs = list_local_docs()
+
+    # Filter by query
+    matching_docs = [doc for doc in all_docs if query.lower() in doc.lower()]
+    return matching_docs
+
+@mcp.tool()
+def semantic_search(query: str, max_results: int = 5, doc_type: Optional[DocumentType] = None) -> List[Dict[str, Any]]:
+    """
+    Performs semantic search on documentation content using RAG.
+
+    This tool searches for documentation based on the meaning of your query, not just keyword matching.
+    It uses vector embeddings to find the most semantically similar documents and returns excerpts from them.
+    You can optionally filter by document type.
+
+    Args:
+        query: Search query to find semantically relevant documentation.
+        max_results: Maximum number of results to return (default: 5).
+        doc_type: Optional document type to filter results ("documentation", "guide", or "convention").
+
+    Returns:
+        A list of documents with their file paths, content excerpts, document type, and relevance scores.
+    """
+    try:
+        # Retrieve similar documents from vlite
+        results = vlite_db.retrieve(
+            text=query,
+            top_k=max_results * 3,  # Get more results if we need to filter
+            return_scores=True
+        )
+
+        # Format the results
+        formatted_results = []
+        for _, text, metadata, score in results:
+            # Get the file path and document type from metadata
+            file_path = metadata.get("file_path", "unknown")
+            doc_type_value = metadata.get("doc_type", "documentation")
+
+            # Filter by document type if specified
+            if doc_type and doc_type_value != doc_type:
+                continue
+
+            # Extract a snippet (first 200 characters)
+            excerpt = text[:200] + "..." if len(text) > 200 else text
+
+            # Create a document result
+            doc = DocumentResult(file_path, excerpt, doc_type_value, score)
+            formatted_results.append(doc.to_dict())
+
+            # Limit results to max_results
+            if len(formatted_results) >= max_results:
+                break
+
+        return formatted_results
+    except Exception as e:
+        return [{"error": f"Error performing semantic search: {str(e)}"}]
+
+@mcp.tool()
+def get_local_doc(file_path: str) -> Dict[str, Any]:
+    """
+    Fetches the content of a specific document file from the local sources directory.
+
+    This tool retrieves the full content of a document file specified by its path.
+    The path should be relative to the sources directory.
+
+    Args:
+        file_path: Path to the document file relative to the sources directory (e.g., 'app-studio/README.md').
+
+    Returns:
+        The content of the document file along with its document type.
+    """
+    # Ensure the path is within the sources directory
+    full_path = os.path.join(SOURCES_DIR, file_path)
+
+    # Check if the file exists
+    if not os.path.isfile(full_path):
+        return {"error": f"File not found: {file_path}"}
+
+    # Read the file content
+    content = get_file_content(full_path)
+
+    # Determine document type
+    doc_type = determine_doc_type(full_path, content)
+
+    return {
+        "file_path": file_path,
+        "content": content,
+        "doc_type": doc_type
+    }
+
+if __name__ == "__main__":
+    # Check if the sources directory exists
+    if not os.path.isdir(SOURCES_DIR):
+        print(f"Warning: Sources directory '{SOURCES_DIR}' not found. Creating it...")
+        os.makedirs(SOURCES_DIR, exist_ok=True)
+
+    # Run the server
+    print(f"Starting Local Documentation MCP Server...")
+    print(f"Serving documents from {os.path.abspath(SOURCES_DIR)}")
+    print(f"Supporting document types: documentation, guides, and conventions")
+
+    # Try to build the index if it doesn't exist
+    if not vlite_db.count():
+        print("Building document index...")
+        try:
+            # Find all markdown and text files in the sources directory
+            markdown_files = glob.glob(f"{SOURCES_DIR}/**/*.md", recursive=True)
+            text_files = glob.glob(f"{SOURCES_DIR}/**/*.txt", recursive=True)
+            mdx_files = glob.glob(f"{SOURCES_DIR}/**/*.mdx", recursive=True)
+            all_files = markdown_files + text_files + mdx_files
+
+            # Counters for document types
+            doc_type_counts = {
+                "documentation": 0,
+                "guide": 0,
+                "convention": 0
+            }
+
+            # Add each file to the index
+            for file_path in all_files:
+                content = get_file_content(file_path)
+                relative_path = get_relative_path(file_path)
+
+                # Determine document type
+                doc_type = determine_doc_type(file_path, content)
+                doc_type_counts[doc_type] += 1
+
+                # Add to vlite with metadata including document type
+                vlite_db.add(
+                    data=content,
+                    metadata={
+                        "file_path": relative_path,
+                        "doc_type": doc_type
+                    }
+                )
+
+                print(f"Indexed: {relative_path} (Type: {doc_type})")
+
+            # Print summary
+            print(f"Successfully indexed {len(all_files)} files:")
+            print(f"- Documentation: {doc_type_counts['documentation']}")
+            print(f"- Guides: {doc_type_counts['guide']}")
+            print(f"- Conventions: {doc_type_counts['convention']}")
+
+        except Exception as e:
+            print(f"Error building index: {str(e)}")
+            print("You can build the index manually using the 'build_docs_index' tool.")
+
+    # Run the server with streamable-http transport
+    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000, path="/mcp")
