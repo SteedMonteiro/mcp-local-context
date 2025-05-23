@@ -2,7 +2,7 @@
 """
 Local Documentation MCP Server with RAG
 
-This server provides access to local documents stored in the `sources/` folder,
+This server provides access to local documents stored in source folders,
 making it easy for AI assistants to access your library documents.
 It uses RAG (Retrieval-Augmented Generation) for semantic search capabilities.
 It supports three types of documents: documentations, guides, and conventions.
@@ -11,21 +11,63 @@ It supports three types of documents: documentations, guides, and conventions.
 import os
 import glob
 import re
+import sys
+import argparse
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Literal
 
-from fastmcp import FastMCP, Context
+from mcp.server.fastmcp import FastMCP, Context
 from vlite import VLite
+
+# Parse command-line arguments
+def parse_args():
+    # Get default values from environment variables if available
+    default_sources = os.environ.get("SOURCE_DIRS", "sources")
+    if "," in default_sources:
+        default_sources = default_sources.split(",")
+    else:
+        default_sources = [default_sources]
+
+    default_host = os.environ.get("MCP_HOST", "127.0.0.1")
+    default_port = int(os.environ.get("MCP_PORT", "8000"))
+    default_path = os.environ.get("MCP_PATH", "/mcp")
+
+    parser = argparse.ArgumentParser(description="Local Documentation MCP Server with RAG")
+    parser.add_argument(
+        "--sources",
+        nargs="+",
+        default=default_sources,
+        help=f"List of source folders to index (default: {default_sources})"
+    )
+    parser.add_argument(
+        "--host",
+        default=default_host,
+        help=f"Host to run the server on (default: {default_host})"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=default_port,
+        help=f"Port to run the server on (default: {default_port})"
+    )
+    parser.add_argument(
+        "--path",
+        default=default_path,
+        help=f"Path for the MCP endpoint (default: {default_path})"
+    )
+    return parser.parse_args()
+
+# Get command-line arguments
+args = parse_args()
 
 # Initialize the MCP server
 mcp = FastMCP(
-    name="Local Developement Context MCP",
-    description= "Retrieves development informations with documentations, guides, and conventions ",
-    version="1.0.0",
+    name="Local Development Context MCP",
+    instructions="Retrieves development information with documentations, guides, and conventions",
 )
 
 # Initialize the vector database
-SOURCES_DIR = Path("sources")
+SOURCE_DIRS = [Path(source) for source in args.sources]
 vlite_db = VLite(collection="local_docs")
 
 # Document types
@@ -58,11 +100,15 @@ def get_file_content(file_path: str) -> str:
         return f"Error reading file: {str(e)}"
 
 def get_relative_path(file_path: str) -> str:
-    """Get the path relative to the sources directory."""
+    """Get the path relative to the source directories."""
     abs_path = os.path.abspath(file_path)
-    abs_docs = os.path.abspath(SOURCES_DIR)
-    if abs_path.startswith(abs_docs):
-        return os.path.relpath(abs_path, abs_docs)
+
+    # Check each source directory
+    for source_dir in SOURCE_DIRS:
+        abs_docs = os.path.abspath(source_dir)
+        if abs_path.startswith(abs_docs):
+            return f"{source_dir.name}/{os.path.relpath(abs_path, abs_docs)}"
+
     return file_path
 
 def determine_doc_type(file_path: str, content: Optional[str] = None) -> DocumentType:
@@ -116,14 +162,16 @@ def build_docs_index(ctx: Context) -> str:
     # Clear existing index
     vlite_db.clear()
 
-    # Find all markdown and text files in the sources directory
-    markdown_files = glob.glob(f"{SOURCES_DIR}/**/*.md", recursive=True)
-    text_files = glob.glob(f"{SOURCES_DIR}/**/*.txt", recursive=True)
-    mdx_files = glob.glob(f"{SOURCES_DIR}/**/*.mdx", recursive=True)
-    all_files = markdown_files + text_files + mdx_files
+    # Find all markdown and text files in all source directories
+    all_files = []
+    for source_dir in SOURCE_DIRS:
+        markdown_files = glob.glob(f"{source_dir}/**/*.md", recursive=True)
+        text_files = glob.glob(f"{source_dir}/**/*.txt", recursive=True)
+        mdx_files = glob.glob(f"{source_dir}/**/*.mdx", recursive=True)
+        all_files.extend(markdown_files + text_files + mdx_files)
 
     if not all_files:
-        return "No document files found in the sources directory."
+        return "No document files found in any of the source directories."
 
     # Counters for document types
     doc_type_counts = {
@@ -166,18 +214,20 @@ def build_docs_index(ctx: Context) -> str:
 @mcp.tool()
 def list_local_docs() -> List[str]:
     """
-    Lists all available document files in the local sources directory.
+    Lists all available document files in all source directories.
 
-    This tool provides a comprehensive list of all document files available in the local sources directory.
+    This tool provides a comprehensive list of all document files available in the configured source directories.
     Use this to discover what documents are available locally before requesting specific files.
 
     Returns:
-        A list of file paths relative to the sources directory.
+        A list of file paths relative to their source directories.
     """
-    markdown_files = glob.glob(f"{SOURCES_DIR}/**/*.md", recursive=True)
-    text_files = glob.glob(f"{SOURCES_DIR}/**/*.txt", recursive=True)
-    mdx_files = glob.glob(f"{SOURCES_DIR}/**/*.mdx", recursive=True)
-    all_files = markdown_files + text_files + mdx_files
+    all_files = []
+    for source_dir in SOURCE_DIRS:
+        markdown_files = glob.glob(f"{source_dir}/**/*.md", recursive=True)
+        text_files = glob.glob(f"{source_dir}/**/*.txt", recursive=True)
+        mdx_files = glob.glob(f"{source_dir}/**/*.mdx", recursive=True)
+        all_files.extend(markdown_files + text_files + mdx_files)
 
     # Convert to relative paths
     relative_paths = [get_relative_path(file_path) for file_path in all_files]
@@ -193,13 +243,13 @@ def list_docs_by_type(doc_type: DocumentType) -> List[str]:
     Lists all document files of a specific type.
 
     This tool provides a list of all document files of the specified type
-    (documentation, guide, or convention) available in the local sources directory.
+    (documentation, guide, or convention) available in the configured source directories.
 
     Args:
         doc_type: The type of document to list ("documentation", "guide", or "convention")
 
     Returns:
-        A list of file paths relative to the sources directory.
+        A list of file paths relative to their source directories.
     """
     # Get all files
     all_files = list_local_docs()
@@ -207,12 +257,19 @@ def list_docs_by_type(doc_type: DocumentType) -> List[str]:
     # Filter files by type
     result_files = []
     for file_path in all_files:
-        full_path = os.path.join(SOURCES_DIR, file_path)
-        content = get_file_content(full_path)
-        file_doc_type = determine_doc_type(full_path, content)
+        # Find the source directory for this file
+        source_prefix = file_path.split('/')[0]
+        source_dir = next((s for s in SOURCE_DIRS if s.name == source_prefix), None)
 
-        if file_doc_type == doc_type:
-            result_files.append(file_path)
+        if source_dir:
+            # Get the path within the source directory
+            relative_path = '/'.join(file_path.split('/')[1:])
+            full_path = os.path.join(source_dir, relative_path)
+            content = get_file_content(full_path)
+            file_doc_type = determine_doc_type(full_path, content)
+
+            if file_doc_type == doc_type:
+                result_files.append(file_path)
 
     return result_files
 
@@ -296,19 +353,31 @@ def semantic_search(query: str, max_results: int = 5, doc_type: Optional[Documen
 @mcp.tool()
 def get_local_doc(file_path: str) -> Dict[str, Any]:
     """
-    Fetches the content of a specific document file from the local sources directory.
+    Fetches the content of a specific document file from the source directories.
 
     This tool retrieves the full content of a document file specified by its path.
-    The path should be relative to the sources directory.
+    The path should be in the format 'source_dir_name/path/to/file.md'.
 
     Args:
-        file_path: Path to the document file relative to the sources directory (e.g., 'app-studio/README.md').
+        file_path: Path to the document file (e.g., 'sources/app-studio/README.md').
 
     Returns:
         The content of the document file along with its document type.
     """
-    # Ensure the path is within the sources directory
-    full_path = os.path.join(SOURCES_DIR, file_path)
+    # Parse the source directory and relative path
+    parts = file_path.split('/', 1)
+    if len(parts) < 2:
+        return {"error": f"Invalid file path format. Expected 'source_dir/path/to/file', got: {file_path}"}
+
+    source_name, relative_path = parts
+
+    # Find the matching source directory
+    source_dir = next((s for s in SOURCE_DIRS if s.name == source_name), None)
+    if not source_dir:
+        return {"error": f"Source directory '{source_name}' not found"}
+
+    # Build the full path
+    full_path = os.path.join(source_dir, relative_path)
 
     # Check if the file exists
     if not os.path.isfile(full_path):
@@ -326,26 +395,32 @@ def get_local_doc(file_path: str) -> Dict[str, Any]:
         "doc_type": doc_type
     }
 
-if __name__ == "__main__":
-    # Check if the sources directory exists
-    if not os.path.isdir(SOURCES_DIR):
-        print(f"Warning: Sources directory '{SOURCES_DIR}' not found. Creating it...")
-        os.makedirs(SOURCES_DIR, exist_ok=True)
+def main():
+    """Main entry point for the MCP server."""
+    global SOURCE_DIRS
+
+    # Check if the source directories exist
+    for source_dir in SOURCE_DIRS:
+        if not os.path.isdir(source_dir):
+            print(f"Warning: Source directory '{source_dir}' not found. Creating it...")
+            os.makedirs(source_dir, exist_ok=True)
 
     # Run the server
     print(f"Starting Local Documentation MCP Server...")
-    print(f"Serving documents from {os.path.abspath(SOURCES_DIR)}")
+    print(f"Serving documents from: {', '.join(str(os.path.abspath(s)) for s in SOURCE_DIRS)}")
     print(f"Supporting document types: documentation, guides, and conventions")
 
     # Try to build the index if it doesn't exist
     if not vlite_db.count():
         print("Building document index...")
         try:
-            # Find all markdown and text files in the sources directory
-            markdown_files = glob.glob(f"{SOURCES_DIR}/**/*.md", recursive=True)
-            text_files = glob.glob(f"{SOURCES_DIR}/**/*.txt", recursive=True)
-            mdx_files = glob.glob(f"{SOURCES_DIR}/**/*.mdx", recursive=True)
-            all_files = markdown_files + text_files + mdx_files
+            # Find all markdown and text files in all source directories
+            all_files = []
+            for source_dir in SOURCE_DIRS:
+                markdown_files = glob.glob(f"{source_dir}/**/*.md", recursive=True)
+                text_files = glob.glob(f"{source_dir}/**/*.txt", recursive=True)
+                mdx_files = glob.glob(f"{source_dir}/**/*.mdx", recursive=True)
+                all_files.extend(markdown_files + text_files + mdx_files)
 
             # Counters for document types
             doc_type_counts = {
@@ -385,4 +460,7 @@ if __name__ == "__main__":
             print("You can build the index manually using the 'build_docs_index' tool.")
 
     # Run the server with streamable-http transport
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8000, path="/mcp")
+    mcp.run(transport="streamable-http", mount_path=args.path)
+
+if __name__ == "__main__":
+    main()

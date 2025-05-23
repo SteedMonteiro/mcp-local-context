@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# MCP Local Context - Simple command to install and use the MCP server
+# This script provides a simple command to install and use the MCP server
+# for Cursor and Cline that can take a list of folders as sources.
+
+# Activate the virtual environment
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+source "$SCRIPT_DIR/.venv/bin/activate"
+
+# Parse command line arguments
+SOURCES=()
+HOST="127.0.0.1"
+PORT="8000"
+PATH="/mcp"
+INSTALL=false
+DEV=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --host)
+            HOST="$2"
+            shift 2
+            ;;
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        --path)
+            PATH="$2"
+            shift 2
+            ;;
+        --install)
+            INSTALL=true
+            shift
+            ;;
+        --dev)
+            DEV=true
+            shift
+            ;;
+        *)
+            SOURCES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Set default sources if none provided
+if [ ${#SOURCES[@]} -eq 0 ]; then
+    SOURCES=("sources")
+fi
+
+# Set environment variables for the sources
+export SOURCE_DIRS=$(IFS=, ; echo "${SOURCES[*]}")
+export MCP_HOST="$HOST"
+export MCP_PORT="$PORT"
+export MCP_PATH="$PATH"
+
+# Find the python command
+PYTHON_CMD="$SCRIPT_DIR/.venv/bin/python"
+if [ ! -f "$PYTHON_CMD" ]; then
+    echo "Error: Could not find python command in $PYTHON_CMD"
+    exit 1
+fi
+
+# Find the mcp command for installation
+MCP_CMD="$SCRIPT_DIR/.venv/bin/mcp"
+
+# Build the command
+if [ "$INSTALL" = true ]; then
+    # Check if mcp command exists
+    if [ ! -f "$MCP_CMD" ]; then
+        echo "Error: Could not find mcp command in $MCP_CMD"
+        exit 1
+    fi
+
+    # Install the server in Claude Desktop
+    CMD=("$MCP_CMD" "install" "$SCRIPT_DIR/simple_mcp_server.py" "--name" "Local Context MCP")
+
+    # Add environment variables
+    CMD+=("-v" "SOURCE_DIRS=$SOURCE_DIRS")
+    CMD+=("-v" "MCP_HOST=$HOST")
+    CMD+=("-v" "MCP_PORT=$PORT")
+    CMD+=("-v" "MCP_PATH=$PATH")
+elif [ "$DEV" = true ]; then
+    # Check if mcp command exists
+    if [ ! -f "$MCP_CMD" ]; then
+        echo "Error: Could not find mcp command in $MCP_CMD"
+        exit 1
+    fi
+
+    # Run the server in development mode with the MCP Inspector
+    CMD=("$MCP_CMD" "dev" "$SCRIPT_DIR/simple_mcp_server.py")
+else
+    # Run the server directly
+    CMD=("$PYTHON_CMD" "$SCRIPT_DIR/simple_mcp_server.py")
+
+    # Add sources
+    if [ ${#SOURCES[@]} -gt 0 ]; then
+        CMD+=("--sources")
+        for source in "${SOURCES[@]}"; do
+            CMD+=("$source")
+        done
+    fi
+
+    # Add host, port, and path
+    CMD+=("--host" "$HOST")
+    CMD+=("--port" "$PORT")
+    CMD+=("--path" "$PATH")
+fi
+
+# Print the command
+echo "Running: ${CMD[*]}"
+
+# Run the command
+"${CMD[@]}"

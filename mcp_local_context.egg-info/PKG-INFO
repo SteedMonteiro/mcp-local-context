@@ -1,3 +1,21 @@
+Metadata-Version: 2.4
+Name: mcp-local-context
+Version: 0.1.1
+Summary: Local Documentation MCP Server with RAG
+Home-page: https://github.com/steedmonteiro/mcp-local-context
+Author: Steed Monteiro
+Author-email: steed.monteiro@gmail.com
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: mcp[cli]>=1.9.1
+Requires-Dist: vlite>=0.2.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-python
+
 # MCP Local Context
 
 A simple MCP server for local documentation with RAG capabilities. This package provides a simple command to install and use the MCP server for Cursor and Claude that can take a list of folders as sources.

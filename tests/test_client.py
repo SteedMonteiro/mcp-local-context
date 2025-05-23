@@ -7,7 +7,7 @@ This script connects to the MCP server and tests the available tools.
 
 import asyncio
 import json
-from fastmcp import Client
+from mcp.client import Client
 
 async def main():
     """Test the MCP server."""
