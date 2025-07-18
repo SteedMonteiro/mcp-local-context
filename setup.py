@@ -3,14 +3,15 @@ from setuptools import setup, find_packages
 
 setup(
     name="mcp-local-context",
-    version="0.1.2",
+    version="0.1.3",
     description="Local Documentation MCP Server with RAG",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     author="Steed Monteiro",
     author_email="steed.monteiro@gmail.com",
     url="https://github.com/steedmonteiro/mcp-local-context",
-    packages=find_packages(),
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
     include_package_data=True,
     install_requires=[
         "mcp[cli]>=1.9.1",

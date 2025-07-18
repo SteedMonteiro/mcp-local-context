@@ -32,22 +32,19 @@ def parse_args():
 def start_server():
     """Start the MCP server in the background."""
     print("Starting MCP server...")
-    
-    # Get the path to the docs_server.py script
-    script_dir = Path(__file__).parent.absolute()
-    docs_server_path = script_dir / "docs_server.py"
-    
-    # Start the server in the background
+
+    # Use the new CLI to start the server
     server_process = subprocess.Popen(
-        [sys.executable, str(docs_server_path)],
+        [sys.executable, "-m", "mcp_local_context.cli"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parent / "src")}
     )
-    
+
     # Wait a bit for the server to start
     import time
-    time.sleep(2)
-    
+    time.sleep(3)
+
     return server_process
 
 def run_test(test_name):

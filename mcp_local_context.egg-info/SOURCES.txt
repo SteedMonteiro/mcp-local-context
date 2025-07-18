@@ -11,6 +11,7 @@ mcp_local_context/simple_server.py
 mcp_local_context.egg-info/PKG-INFO
 mcp_local_context.egg-info/SOURCES.txt
 mcp_local_context.egg-info/dependency_links.txt
+mcp_local_context.egg-info/entry_points.txt
 mcp_local_context.egg-info/requires.txt
 mcp_local_context.egg-info/top_level.txt
 tests/test.py
