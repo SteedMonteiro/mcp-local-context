@@ -86,7 +86,7 @@ def main():
     
     # Update __init__.py
     update_file(
-        "mcp_local_context/__init__.py",
+        "src/mcp_local_context/__init__.py",
         r'(__version__\s*=\s*")([^"]+)(")',
         new_version
     )

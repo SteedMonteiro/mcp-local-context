@@ -16,6 +16,8 @@ show_help() {
     echo "                             (default: sources)"
     echo "  -a, --all [source_dirs]    Install dependencies and run the server"
     echo "                             (default: sources)"
+    echo "  -p, --publish [bump_type]  Publish package to PyPI with version bump"
+    echo "                             (bump_type: major, minor, patch - default: patch)"
     echo "  --host [hostname]          Host to run the server on (default: 127.0.0.1)"
     echo "  --port [port]              Port to run the server on (default: 8000)"
     echo "  --path [path]              Path for the MCP endpoint (default: /mcp)"
@@ -27,6 +29,8 @@ show_help() {
     echo "  ./install.sh --all                      # Install and run with default 'sources' directory"
     echo "  ./install.sh --all docs api-docs        # Install and run with multiple source directories"
     echo "  ./install.sh --all --host 0.0.0.0       # Install and run with custom host"
+    echo "  ./install.sh --publish                  # Publish with patch version bump"
+    echo "  ./install.sh --publish minor            # Publish with minor version bump"
     echo ""
 }
 
@@ -105,6 +109,33 @@ install_and_run() {
     run_server "$@"
 }
 
+# Function to publish package
+publish_package() {
+    local bump_type="${1:-patch}"
+
+    # Validate bump type
+    if [[ "$bump_type" != "major" && "$bump_type" != "minor" && "$bump_type" != "patch" ]]; then
+        echo "Invalid bump type. Use 'major', 'minor', or 'patch'."
+        exit 1
+    fi
+
+    echo "Publishing package with $bump_type version bump..."
+
+    # Check if publish.sh exists and is executable
+    if [ ! -f "publish.sh" ]; then
+        echo "Error: publish.sh not found!"
+        exit 1
+    fi
+
+    if [ ! -x "publish.sh" ]; then
+        echo "Making publish.sh executable..."
+        chmod +x publish.sh
+    fi
+
+    # Run the publish script
+    ./publish.sh "$bump_type"
+}
+
 # Parse command line arguments
 if [ $# -eq 0 ]; then
     show_help
@@ -125,6 +156,10 @@ case "$1" in
     -a|--all)
         shift
         install_and_run "$@"
+        ;;
+    -p|--publish)
+        shift
+        publish_package "$@"
         ;;
     *)
         echo "Unknown option: $1"
